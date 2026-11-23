@@ -1,0 +1,3 @@
+ratings.parquet
+__pycache__/
+*.log
