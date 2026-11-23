@@ -489,6 +489,37 @@ RES["size_matched"] = dict(n=len(SZ), fpr=float((SZ.p < 0.10).mean()), placebo_s
 print(RES["size_matched"])
 
 # %% [markdown]
+# ## Negative control: synthetic data where every county is exchangeable
+# If the placebo tests are miscalibrated even when geos are exchangeable by construction, the problem is the method or my code.
+# If they are close to 10% here, the inflation on Iowa comes from the real data. 30 synthetic panels (60 geos, sizes as varied as
+# real counties, a shared weekly shock, independent AR(1) geo noise), 50 A/A designs each, same pipeline as above.
+
+# %%
+def ar1(n, phi, sd, rng, shape=()):
+    x = np.zeros(shape + (n,)); e = rng.normal(0, sd, shape + (n,))
+    for t in range(1, n): x[..., t] = phi * x[..., t - 1] + e[..., t]
+    return x
+syn = []
+for sim in range(30):
+    rng = np.random.default_rng(7000 + sim)
+    Gs = 60; size = np.exp(rng.normal(0, 1.0, Gs))
+    Y = (size[:, None] * np.exp(ar1(WIN, 0.8, 0.05, rng)[None, :] + ar1(WIN, 0.5, 0.08, rng, (Gs,)))).T
+    share = Y[I_TR].sum(0) / Y[I_TR].sum(); labels = strata(Y[I_TR], seed=sim)
+    cand = gen_masks("stratified", share, labels, N_CAND, rng); r2 = r2_val(gmean(Y, cand), gmean(Y, 1 - cand))
+    elig = np.where(r2 >= 0.8)[0]; pick = rng.choice(elig, 50, replace=False) if len(elig) >= 50 else np.argsort(-r2)[:50]
+    for j in pick:
+        tm = cand[j]
+        PT, PC = placebos(Y, tm, "stratified", labels, rng, True); RT, RC = placebos(Y, tm, "stratified", labels, rng, False)
+        a = analyze_tbr(Y, tm, PT, PC, 0.0); b = analyze_tbr(Y, tm, RT, RC, 0.0)
+        syn.append(dict(sim=sim, p_da=a["p"], p_rand=b["p"], p_t=a["p_t"]))
+SYN = pd.DataFrame(syn)
+def cl_ci(df, col, B=2000, seed=0):
+    rb = np.random.default_rng(seed); g = df.groupby("sim")[col].apply(lambda p: (p < 0.10).mean()); ids = g.index.values
+    return [float(x) for x in np.percentile([g.loc[rb.choice(ids, len(ids))].mean() for _ in range(B)], [2.5, 97.5])]
+RES["synthetic_null"] = {c: dict(fpr=float((SYN[c] < 0.10).mean()), ci=cl_ci(SYN, c)) for c in ["p_da", "p_rand", "p_t"]}
+print(RES["synthetic_null"])
+
+# %% [markdown]
 # ## Cross-check with Google's own library
 # My implementation could be wrong, so I ran the real `meridian-geox` package (v1.0.1) on the same Iowa data, at daily grain as it expects.
 # `libcheck/geox_lib_aa.py` does it: 61 windows of 168 pre-period days and 28 test days, `run_design` with defaults
@@ -507,6 +538,29 @@ RES["library"] = dict(windows=len(LIB), analyzed=len(lib_ok), refused=len(LIB) -
                       point_outside_ci_aa=float(np.mean([not (x["percent_lift_0.0"]["lo"] <= x["percent_lift_0.0"]["point"] <= x["percent_lift_0.0"]["hi"]) for x in lib_ok])),
                       median_mde=float(np.median([x["mde"] for x in lib_ok])))
 print(RES["library"])
+
+# %% [markdown]
+# Same negative control for the library: `libcheck/geox_lib_synthetic.py` runs GeoX with the same settings on 100 synthetic daily panels
+# where geos are exchangeable by construction.
+
+# %%
+def lib_summary(path):
+    ok = [x for x in json.load(open(path)) if "error" not in x]
+    pv = np.array([x["percent_lift_0.0"]["p"] for x in ok]); k = int((pv < 0.10).sum())
+    return dict(analyzed=len(ok), fpr=k / len(ok), fpr_ci=[float(c) for c in stats.binomtest(k, len(ok)).proportion_ci(0.95)],
+                coverage_5=float(np.mean([x["percent_lift_0.05"]["lo"] <= 0.05 <= x["percent_lift_0.05"]["hi"] for x in ok])))
+RES["library_synthetic"] = lib_summary("libcheck/geox_lib_synthetic_results.json")
+print("synthetic, design right before the test:", RES["library_synthetic"])
+
+# %% [markdown]
+# One more possible cause: the analysis measures the fit error on the last 28 pre-test days, the same days the design step used to pick
+# the best design, so the chosen design's error could look luckily small. Both library runs were repeated with the design step only
+# seeing data that ends 28 days before the test (third argument of the scripts).
+
+# %%
+RES["library_synthetic_gap"] = lib_summary("libcheck/geox_lib_synthetic_gap28.json")
+RES["library_gap"] = lib_summary("libcheck/geox_lib_aa_gap28.json")
+print("synthetic, 28-day gap:", RES["library_synthetic_gap"]); print("Iowa, 28-day gap:", RES["library_gap"])
 
 # %% [markdown]
 # ## Figures
@@ -554,3 +608,35 @@ def clean(o):
     if isinstance(o, np.bool_): return bool(o)
     return o
 json.dump(clean(RES), open("figures/results.json", "w"), indent=1)
+
+# %% [markdown]
+# ## Scorecard
+
+# %%
+
+def scorecard(rows, title, path):
+    """rows: (id, claim, test, result, verdict). Verdict colors: Pass green, Fail red, other amber."""
+    colors = {"Pass": "#2f855a", "Fail": "#c53030"}
+    fig, ax = plt.subplots(figsize=(10, 0.48 * len(rows) + 1.0)); ax.axis("off")
+    heads = ["", "Claim", "Pre-registered test", "Result", "Verdict"]
+    xs = [0.0, 0.05, 0.40, 0.70, 0.93]
+    y = 1.0; step = 1.0 / (len(rows) + 1.3)
+    for x, h in zip(xs, heads): ax.text(x, y, h, fontsize=9, fontweight="bold", va="top", transform=ax.transAxes)
+    for r in rows:
+        y -= step
+        ax.plot([0, 1], [y + step * 0.25] * 2, color="#e2e8f0", lw=0.8, transform=ax.transAxes)
+        for x, t in zip(xs[:4], r[:4]): ax.text(x, y, t, fontsize=8.5, va="top", transform=ax.transAxes, wrap=True)
+        ax.text(xs[4], y, r[4], fontsize=9, fontweight="bold", va="top", color=colors.get(r[4].split()[0], "#b7791f"), transform=ax.transAxes)
+    ax.set_title(title, fontsize=10, loc="left")
+    fig.tight_layout(); fig.savefig(path, dpi=200, bbox_inches="tight")
+
+R_ = RES
+scorecard([
+    ("H1", "Stratified sampling lowers MDE", "Wins more studies, sign test p < 0.05", f"{R_['H1']['strat_wins']}/{R_['H1']['n']} studies, p = {R_['H1']['p']:.3f}", "Fail"),
+    ("H2", "TBR is the most efficient estimator", "Lowest median MDE and most wins", f"TBR {R_['H2']['median_mde']['tbr']*100:.1f}%, SDID {R_['H2']['median_mde']['sdid']*100:.1f}%, SC {R_['H2']['median_mde']['sc']*100:.1f}%", "Pass"),
+    ("H2b", "SC does better when data is noisy", "Spearman > 0, p < 0.05", f"rho = {R_['H2b']['spearman']:.2f}", "Fail"),
+    ("H3", "Placebo keeps false positives at 10%", "A/A rate between 7% and 13%", f"{R_['H3']['pooled']['p_da']*100:.0f}% (Google's library: {R_['library']['fpr']*100:.0f}%)", "Fail"),
+    ("H4", "Design-aware placebo lowers MDE", "Lower in most studies, p < 0.05", f"{R_['H4']['median_reduction']*100:.0f}% lower (paper 31%)", "Pass (see H3)"),
+    ("H5", "Estimates unbiased, 90% intervals cover", "Bias within 1 pt, coverage 85% to 95%", f"Bias {R_['H5']['chosen_mean_err_pp']:+.1f} pt, coverage {R_['H5']['chosen_coverage']*100:.0f}%", "Fail"),
+    ("H6", "The promised MDE is honest", "Lift = promised MDE found 75%+", f"Found {R_['H6']['chosen_detect']*100:.0f}% of the time", "Fail"),
+], "Meridian GeoX on 63 Iowa studies: pre-registered claims and results", "figures/fig0_scorecard.png")

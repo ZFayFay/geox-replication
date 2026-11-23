@@ -18,18 +18,28 @@ The hypotheses and pass/fail rules were committed before any analysis. See [PRER
 | H5 | 5% lift: unbiased, 90% interval covers 85% to 95% | Bias -0.2 points; coverage 44% | **Fail** |
 | H6 | Injecting the promised MDE is detected at least 75% of the time | 33% for the chosen design (promised 1.6%, measured 3.7%) | **Fail** |
 
-**Cross-check with Google's library.** `libcheck/geox_lib_aa.py` runs `meridian-geox` 1.0.1 with its defaults on the same data at daily grain: 61 windows, 60 analyzed. It flagged 42% of A/A tests at the 10% level, and its 90% interval covered a 5% lift 58% of the time, while its average estimate (5.3%) was right.
+**Checks added after H3 failed** (all in the notebook, labeled exploratory):
+
+| A/A tests flagged at the 10% level | Iowa | Synthetic, geos exchangeable by construction |
+|---|---|---|
+| My design-aware placebo | 22% | 15% |
+| My random placebo | 12% | 12% |
+| t-test (independent weeks) | 26% | 47% |
+| Google's `meridian-geox` 1.0.1, defaults, daily data | 42% (60 windows) | 28% (100 panels) |
+| Same, design data ending 28 days before the test | 48% | 23% |
+
+Matching the placebo selection to the designs (23%) or matching placebo size and sales share (21%) did not fix my implementation. With a 5% injected lift, the library's average estimate was right (5.3%) but its 90% interval covered the truth 58% of the time. Scripts: `libcheck/geox_lib_aa.py` (Iowa) and `libcheck/geox_lib_synthetic.py` (synthetic).
 
 ![False positives](figures/fig1_false_positives.png)
 ![MDE promise](figures/fig3_mde_promise.png)
 
 ## Caveats
 
-One public dataset. County liquor orders are lumpy, especially by day, and counties are not media markets. My design search simplifies GeoX's (no Sobol sequences or minimal-discrepancy strata). Google's own evaluation used 192 advertisers' data. The point is not that GeoX is broken, but that its intervals were too narrow on this data, both in my implementation and in theirs, so a backtest on your own history is worth doing.
+One public dataset. County liquor orders are lumpy, especially by day, and counties are not media markets. My design search simplifies GeoX's (no Sobol sequences or minimal-discrepancy strata). Google's own evaluation used 192 advertisers' data. The point is not that GeoX is broken, but that its intervals were too narrow on this data and on easy synthetic data, in my implementation and in theirs, so a backtest on your own history is worth doing. If I am calling the library in a way it was not meant to be used, I would like to know.
 
 ## Files
 
-- `geox_replication.ipynb`: the full analysis, executed (about 3 minutes on 2 CPU cores).
+- `geox_replication.ipynb`: the full analysis, executed (about 10 minutes on 2 CPU cores).
 - `geox.py`: the same code as a script (percent format).
 - `iowa_weekly_county.parquet`, `iowa_daily_county.parquet`: the aggregated data.
 - `libcheck/`: the run of Google's library and its saved output.
@@ -40,8 +50,10 @@ One public dataset. County liquor orders are lumpy, especially by day, and count
 ```
 pip install numpy pandas scipy scikit-learn matplotlib pyarrow
 jupyter nbconvert --to notebook --execute geox_replication.ipynb
-# optional, about 25 minutes:
-pip install meridian-geox && python libcheck/geox_lib_aa.py libcheck/geox_lib_aa_results.json 60
+# optional, Google's library (about 25 and 10 minutes):
+pip install meridian-geox
+python libcheck/geox_lib_aa.py libcheck/geox_lib_aa_results.json 60        # add 28 as a third argument for the gap run
+python libcheck/geox_lib_synthetic.py libcheck/geox_lib_synthetic_results.json 100
 ```
 
 The raw data is the Iowa Liquor Sales dataset (data.iowa.gov), mirrored on Hugging Face as `lmmcfarland1/iowa_liquor_data_csv` (7 GB). `libcheck/agg_iowa.py` streams it into the daily county file.

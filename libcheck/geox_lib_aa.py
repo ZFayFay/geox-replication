@@ -10,6 +10,7 @@ D["location"] = D.county.astype(int).astype(str)
 full = D.pivot_table(index="date", columns="location", values="sales", aggfunc="sum")
 full = full.reindex(pd.date_range(full.index.min(), full.index.max(), freq="D")).fillna(0.0)
 PRE, TEST = 168, 28
+GAP = int(sys.argv[3]) if len(sys.argv) > 3 else 0   # days of pre-period withheld from the design step
 starts = list(range(0, len(full) - PRE - TEST, int(sys.argv[2]) if len(sys.argv) > 2 else 120))
 out_path = sys.argv[1]
 res = []
@@ -20,7 +21,7 @@ for i, s in enumerate(starts):
     win = win[keep]
     long = win.stack().rename("conversions").reset_index().rename(columns={"level_0": "date"})
     long["spend"] = long.conversions * 0.01
-    pre = long[long.date < win.index[PRE]]
+    pre = long[long.date < win.index[PRE - GAP]]
     try:
         cfg = geox.DesignConfig(experiment_duration=datetime.timedelta(days=TEST), experiment_types=geox.ExperimentType.HOLDBACK,
                                 methodology=geox.Methodology.TBR, geo_assignment_rule=geox.GeoAssignmentRule.STRATIFIED_SAMPLING,
@@ -29,7 +30,7 @@ for i, s in enumerate(starts):
         design = list(ds.designs.values())[0]
         treated = sorted(list(design.designs.values())[0].treatment_geos)
         mde = list(design.designs.values())[0].minimum_detectable_effect
-        row = dict(window=i, start=str(win.index[0].date()), test_start=str(win.index[PRE].date()), n_geos=len(keep), n_treated=len(treated), mde=float(mde))
+        row = dict(window=i, gap=GAP, start=str(win.index[0].date()), test_start=str(win.index[PRE].date()), n_geos=len(keep), n_treated=len(treated), mde=float(mde))
         for lift in [0.0, 0.05]:
             ana = long.copy()
             m = (ana.date >= win.index[PRE]) & ana.location.isin(treated)
