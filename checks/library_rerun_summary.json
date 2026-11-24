@@ -1,0 +1,42 @@
+{
+ "iowa_daily_pypi_1.0.1": {
+  "windows_run": 45,
+  "windows_analyzed": 44,
+  "aa_flagged_at_10pct": 21,
+  "promised_lift_detected": [
+   24,
+   44
+  ],
+  "interval_covers_5pct_lift": [
+   23,
+   44
+  ],
+  "design_warnings_windows": {
+   "Missing conversion days percentage exceeds 30% during the pretest period": 32,
+   "Zero conversion percentage exceeds 50% during the pretest period": 44,
+   "Found outlier pretest dates": 6
+  }
+ },
+ "synthetic_pypi_1.0.1": {
+  "windows_run": 100,
+  "windows_analyzed": 100,
+  "aa_flagged_at_10pct": 28,
+  "promised_lift_detected": [
+   53,
+   100
+  ],
+  "interval_covers_5pct_lift": [
+   71,
+   100
+  ],
+  "design_warnings_windows": {}
+ },
+ "synthetic_github_main": {
+  "windows_run": 62,
+  "windows_analyzed": 62,
+  "aa_flagged_at_10pct": 19,
+  "design_warnings_windows": {},
+  "version": "google/meridian-geox main, commit b0d7b8c"
+ },
+ "note": "Reruns of libcheck/ with 20,000 candidates and placebos. The 45 Iowa windows and 100 synthetic windows rerun matched libcheck/*_results.json exactly."
+}
